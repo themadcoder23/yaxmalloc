@@ -17,4 +17,8 @@ The engine is actively tested against the standard C library (`glibc`) `malloc` 
 * **Architectural Bottleneck:** The current $O(N)$ linear scan of the Implicit Free List performs approximately 4.4x slower than the kernel's optimized standard library. 
 
 ## Engineering Roadmap
-* **Phase 2 (Next Target):** Upgrade the core engine to an **Explicit Free List**. By embedding physical `NEXT` and `PREV` pointers directly inside the unused payload space of free blocks, the allocation time complexity will be reduced from $O(N)$ to $O(1)$, directly bridging the nanosecond latency gap with the OS.
+## Phase 2 Technical Specifications
+* **Engine Upgrade:** Transitioned from an Implicit to an Explicit Free List using a Doubly Linked List architecture.
+* **O(1) List Management:** Hijacked the unused payload space of free blocks to physically store 8-byte `PREV` and `NEXT` memory addresses. 
+* **LIFO Insertion:** Newly freed blocks are instantly routed to the head of the list, reducing insertion and detachment time complexity from $O(N)$ to $O(1)$.
+* **Performance Reality:** The $O(1)$ pointer jumps completely bypass allocated blocks, eliminating the $O(N)$ bottleneck and bridging the nanosecond latency gap with `glibc`.
