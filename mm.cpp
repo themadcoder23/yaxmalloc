@@ -28,21 +28,19 @@ void *mem_sbrk(int incr) {
 #define CHUNKSIZE  (1<<12) 
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
-#define PACK(size, alloc)  ((size) | (alloc))
-
-#define GET(p)       (*(unsigned int *)(p))
-#define PUT(p, val)  (*(unsigned int *)(p) = (val))
-
+#define PACK(size, alloc) ((size) | (alloc))
+#define GET(p) (*(unsigned int *)(p))
+#define PUT(p, val) (*(unsigned int *)(p) = (val))
 #define GET_SIZE(p)  (GET(p) & ~0x7)
 #define GET_ALLOC(p) (GET(p) & 0x1)
-
-#define HDRP(bp)       ((char *)(bp) - WSIZE)
-#define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
-
+#define HDRP(bp)  ((char *)(bp) - WSIZE)
+#define FTRP(bp)  ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
-
+#define NEXT_FREE_BLKP(bp) (*(char **)(bp))
+#define PREV_FREE_BLKP(bp) (*(char **)(bp+DSIZE))
 static char *heap_listp = 0;
+static char *free_list_head = NULL;
 
 // --- ENGINE MECHANICS ---
 static void *coalesce(void *bp) {
@@ -135,7 +133,8 @@ void *mm_malloc(size_t size) {
 
     if (size <= DSIZE) {
         asize = 2 * DSIZE;
-    } else {
+    } 
+    else {
         asize = (size + DSIZE + (DSIZE - 1)) & ~0x7;
     }
 
@@ -156,4 +155,39 @@ void mm_free(void *bp) {
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     coalesce(bp);
+}
+
+//Explicit Free List Functions
+
+void remove_block(void *bp){
+    char *prev_blk = PREV_FREE_BLKP(bp);
+    char *next_blk = NEXT_FREE_BLKP(bp);
+    if(prev_blk != NULL && next_blk != NULL){
+        NEXT_FREE_BLKP(prev_blk) = next_blk;
+        PREV_FREE_BLKP(next_blk) = prev_blk;
+    }
+    else if(prev_blk != NULL && next_blk == NULL){
+        NEXT_FREE_BLKP(prev_blk) = NULL;
+    }
+    else if(prev_blk == NULL && next_blk != NULL){
+        free_list_head = next_blk;
+        PREV_FREE_BLKP(next_blk) = NULL;
+    }
+    else{
+        free_list_head = NULL;
+    }
+}
+
+void insert_block(void *bp){
+    if(free_list_head == NULL){
+        NEXT_FREE_BLKP(bp) = NULL;
+        PREV_FREE_BLKP(bp) = NULL;
+        free_list_head = (char*)(bp);
+    }
+    else{
+        NEXT_FREE_BLKP(bp) = free_list_head;
+        PREV_FREE_BLKP(bp) = NULL;
+        PREV_FREE_BLKP(free_list_head) = (char*)(bp);
+        free_list_head = (char*)(bp);
+    }
 }
