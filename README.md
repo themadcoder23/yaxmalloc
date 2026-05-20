@@ -10,15 +10,14 @@ This project is a custom implementation of a dynamic memory allocator (a lightwe
 * **Fragmentation Control:** Immediate, constant-time boundary tag coalescing merges adjacent free blocks to eliminate external memory fragmentation.
 * **Metadata Overhead:** 8 bytes per block (4-byte Header, 4-byte Footer) utilizing bitwise masking to store allocation status in the least significant bit (LSB).
 
-## Benchmarks & Performance profile
+## Benchmarks & Performance Profile (Implicit List)
 The engine is actively tested against the standard C library (`glibc`) `malloc` using the `google/benchmark` framework across hundreds of millions of iterations.
+* **Average Throughput (8B - 512B payloads):** ~3.8 ns for `glibc` vs ~16.4 ns for Custom (Implicit).
+* **Architectural Bottleneck:** The $O(N)$ linear scan of the Implicit Free List performs approximately 4.4x slower than the kernel's optimized standard library for small allocations.
 
-* **Average Throughput (8B - 512B payloads):** ~16.4 ns per allocation/free cycle.
-* **Architectural Bottleneck:** The current $O(N)$ linear scan of the Implicit Free List performs approximately 4.4x slower than the kernel's optimized standard library. 
-
-## Engineering Roadmap
 ## Phase 2 Technical Specifications
 * **Engine Upgrade:** Transitioned from an Implicit to an Explicit Free List using a Doubly Linked List architecture.
-* **O(1) List Management:** Hijacked the unused payload space of free blocks to physically store 8-byte `PREV` and `NEXT` memory addresses. 
+* **O(1) List Management:** Hijacked the unused payload space of free blocks to physically store 8-byte `PREV` and `NEXT` memory addresses. Minimum block size structurally enforced at 24 bytes (16 bytes payload + 8 bytes tags) to prevent 64-bit pointer collisions.
 * **LIFO Insertion:** Newly freed blocks are instantly routed to the head of the list, reducing insertion and detachment time complexity from $O(N)$ to $O(1)$.
-* **Performance Reality:** The $O(1)$ pointer jumps completely bypass allocated blocks, eliminating the $O(N)$ bottleneck and bridging the nanosecond latency gap with `glibc`.
+* **Performance Reality (Explicit List):** The explicit implementation correctly bypasses allocated blocks. However, small allocation throughput (8B - 512B) currently sits at ~19 ns. Because it relies on a First-Fit traversal of all *free* blocks, the $O(N_{free})$ search still trails `glibc`'s $O(1)$ fastbins. 
+* **High-Bandwidth Parity:** At 8192-byte allocations, the custom allocator achieves parity with `glibc` (12.6 ns vs 12.2 ns), as memory bandwidth and OS paging overhead replace list traversal as the primary performance bottleneck.
