@@ -37,13 +37,18 @@ void *mem_sbrk(int incr) {
 #define FTRP(bp)  ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
-#define NEXT_FREE_BLKP(bp) (*(char **)(bp))
-#define PREV_FREE_BLKP(bp)  (*(char **)((char *)(bp) + DSIZE))
+#define GET_NEXT_FREE_BLKP(bp) (*(void**)(bp))
+#define SET_NEXT_FREE_BLKP(bp,next) (*(void**) (bp) = (next))
+#define GET_PREV_FREE_BLKP(bp)       (*(void **)((char *)(bp) + DSIZE))
+#define SET_PREV_FREE_BLKP(bp, prev) (*(void **)((char *)(bp) + DSIZE) = (prev))
+
+#define LIST_COUNT 15
+static char *segregated_free_lists[LIST_COUNT];
 static char *heap_listp = 0;
-static char *free_list_head = NULL;
 
 static void remove_block(void *bp);
 static void insert_block(void *bp);
+inline int get_bucket(size_t size);
 
 // --- ENGINE MECHANICS ---
 static void *coalesce(void *bp) {
@@ -97,19 +102,26 @@ static void *extend_heap(size_t words) {
 }
 
 static void *find_fit(size_t asize) {
-    void *bp;
-    for (bp = free_list_head; bp!= NULL; bp = NEXT_FREE_BLKP(bp)) {
-        if (asize <= GET_SIZE(HDRP(bp))) {
-            return bp;
+    int start_index = get_bucket(asize);
+    for (int i = start_index; i < LIST_COUNT; i++) {
+        void *bp = segregated_free_lists[i];
+        
+        // Scan the linked list at this specific bucket
+        while (bp != NULL) {
+            if (asize <= GET_SIZE(HDRP(bp))) {
+                return bp; // Found it
+            }
+            bp = GET_NEXT_FREE_BLKP(bp);
         }
     }
+    
     return NULL;
 }
 
 static void place(void *bp, size_t asize) {
     size_t csize = GET_SIZE(HDRP(bp));
     remove_block(bp);
-    if(csize - asize >= 2*DSIZE){
+    if(csize - asize >= 3*DSIZE){
         PUT(HDRP(bp),PACK(asize,1));
         PUT(FTRP(bp),PACK(asize,1));
         bp = NEXT_BLKP(bp);
@@ -125,8 +137,12 @@ static void place(void *bp, size_t asize) {
 
 // --- PUBLIC API ---
 int mm_init(void) {
-    free_list_head = NULL;
-    if ((heap_listp = (char *)mem_sbrk(4 * WSIZE)) == (void *)-1) return -1;
+    for (int i = 0; i < LIST_COUNT; i++) {
+        segregated_free_lists[i] = NULL;
+    }
+    if ((heap_listp = (char*)mem_sbrk(4 * WSIZE)) == (void *)-1) {
+        return -1;
+    }
     
     PUT(heap_listp, 0);                            // Alignment padding
     PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); // Prologue header
@@ -170,37 +186,42 @@ void mm_free(void *bp) {
     coalesce(bp);
 }
 
-//Explicit Free List Functions
-
-void remove_block(void *bp){
-    char *prev_blk = PREV_FREE_BLKP(bp);
-    char *next_blk = NEXT_FREE_BLKP(bp);
-    if(prev_blk != NULL && next_blk != NULL){
-        NEXT_FREE_BLKP(prev_blk) = next_blk;
-        PREV_FREE_BLKP(next_blk) = prev_blk;
+void remove_block(void *bp) {
+    size_t size = GET_SIZE(HDRP(bp));
+    int index = get_bucket(size);
+    
+    void *prev = GET_PREV_FREE_BLKP(bp);
+    void *next = GET_NEXT_FREE_BLKP(bp);
+    
+    if (prev != NULL) {
+        SET_NEXT_FREE_BLKP(prev, next);
+    } else {
+        
+        segregated_free_lists[index] = (char*) next; 
     }
-    else if(prev_blk != NULL && next_blk == NULL){
-        NEXT_FREE_BLKP(prev_blk) = NULL;
-    }
-    else if(prev_blk == NULL && next_blk != NULL){
-        free_list_head = next_blk;
-        PREV_FREE_BLKP(next_blk) = NULL;
-    }
-    else{
-        free_list_head = NULL;
+    
+    if (next != NULL) {
+        SET_PREV_FREE_BLKP(next, prev);
     }
 }
 
-void insert_block(void *bp){
-    if(free_list_head == NULL){
-        NEXT_FREE_BLKP(bp) = NULL;
-        PREV_FREE_BLKP(bp) = NULL;
-        free_list_head = (char*)(bp);
+void insert_block(void *bp) {
+    size_t size = GET_SIZE(HDRP(bp));
+    int index = get_bucket(size);
+
+    void *current_head = segregated_free_lists[index];
+    
+    SET_NEXT_FREE_BLKP(bp, current_head);
+    SET_PREV_FREE_BLKP(bp, NULL);
+    
+    if (current_head != NULL) {
+        SET_PREV_FREE_BLKP(current_head, bp);
     }
-    else{
-        NEXT_FREE_BLKP(bp) = free_list_head;
-        PREV_FREE_BLKP(bp) = NULL;
-        PREV_FREE_BLKP(free_list_head) = (char*)(bp);
-        free_list_head = (char*)(bp);
-    }
+    
+    segregated_free_lists[index] =(char*)bp;
+}
+
+inline int get_bucket(size_t size){
+    int index = 59 - __builtin_clzll(size);
+    return (index >= 14)? 14 : index;
 }
