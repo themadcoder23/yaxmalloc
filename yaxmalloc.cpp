@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cstdint>
-
+#include <pthread.h>
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 // --- KERNEL SIMULATION SANDBOX ---
 #define MAX_HEAP (20 * (1 << 20)) // 20 MB
 static char *mem_heap;
@@ -155,9 +156,11 @@ int mm_init(void) {
 }
 
 void *mm_malloc(size_t size) {
+    if(size == 0){
+        return NULL;
+    }
+    pthread_mutex_lock(&lock);
     size_t asize;
-
-    if (size == 0) return NULL;
     if(size <= 2*DSIZE){
         asize = 3*DSIZE;
     }
@@ -167,23 +170,29 @@ void *mm_malloc(size_t size) {
     void *bp = find_fit(asize);
     if(bp != NULL){
         place(bp,asize);
+        pthread_mutex_unlock(&lock);
         return bp;
     }
     else{
         size_t extend_size = MAX(asize,CHUNKSIZE);
         if((bp = extend_heap(extend_size/WSIZE)) == NULL){
+            pthread_mutex_unlock(&lock);
             return NULL;
         }
         place(bp,asize);
+        pthread_mutex_unlock(&lock);
         return bp;
     }
 }
 
 void mm_free(void *bp) {
+    if(bp == NULL) return;
+    pthread_mutex_lock(&lock);
     size_t size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp),PACK(size,0));
     PUT(FTRP(bp),PACK(size,0));
     coalesce(bp);
+    pthread_mutex_unlock(&lock);
 }
 
 void remove_block(void *bp) {
